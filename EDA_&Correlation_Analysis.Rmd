@@ -1,0 +1,806 @@
+---
+title: "Credit_portfolio_EDA"
+author: "Daniel Mogere"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+In this markdown file, I conduct some Exploratory Data Analysis on the credit data. I start with univariate analysis and then later explore some cross-tabulations with the outcome variables
+
+__KEY HIGHLIGHTS__
+
+**Findings from Univariate analysis:**
+
+- The data is imbalanced, majority (75%) were customers with fully paid loans, 25% charged off.
+- Majority (34%) have an annual income of between 1-1.5M, closely followed by those with an annual income of 500K-1M (31%)
+- Majority (35%) have been in their current job for more than 10 years
+- Majority (49%) have a Home mortgage, closely followed by those living on rental apartments(42%)
+- About 60% of the customers have 10-20 years of credit history, and have a "Good" credit score 670-739(74%).
+- 74% of the loans were short term, and the main purpose of the loans was for debt consolidation (79%)
+- Majority took out loan amount between 200-500K
+
+**Findings from bi-variate analysis:**
+
+- Majority(47%) of the loans that were charged off arose from clients with "rental" home-ownership.
+- Of the loans, classified as "long-term", there were more of them "charged off"(37% of charged off loans) than those that were "Fully paid".(23% of Fully Paid loans)
+
+**Findings from Statistical Analysis:**
+
+- There is a statistically significant difference between the average current loan amount of the Fully Paid category(288894.4) and the average current loan amount of the Charged off category (324975.2), p=0.
+- There are higher odds of a short term loan being fully paid (97% increase in odds) than a long term loan being fully paid (84% increase in odds)
+
+- As the annual income of the customer increases, it does not affect the chance of the loan being fully paid.
+
+- An increase in the current loan amount by 1 unit (shilling) reduces the odds of a loan being fully repaid by about 0.0001%.
+
+- An increase in the montly debt by one unit reduces the odds of a loan being fully paid by 0.0002% chance.
+
+- As the customer's years of credit history increase by one year, the chances of a loan being fully paid increase by 0.989%
+
+- An increase by 1 unit of credit score, increase the probability of a loan being repaid by 50%
+
+- For a customer who has zero months since they were last deliquent, there is 74% probability that the loan will be fully repaid. As the months since a customer was deliquent increase by 1 month, the probability of a loan being fully paid are 50%.
+
+- For a customer who has zero open accounts, the probability of a loan being fully paid is 76%. When the cutomer's open account increase by 1 more account, it reduces the probability of a loan being fully paid by 50%.
+
+- When a customer has zero credit problems, there is a 75% probability that the loan will be fully paid. When a customer's credit problems increase by 1, the probability of the loan being fully repaid reduces by 51%.
+
+- An increase in credit balance, has no effect on the probability of  a loan being fully paid. Same case with the maximum open credit.
+
+- When a customer has 0 bankruptcies, the probability if a loan being fully repaid is 74.7%.
+
+
+-When a customer has zero tax liens, the probability of a loan being fully repaid is 74.8%. When the tax liens increase by 1 unit, the probability of a loan  being fully repaid drop by 53%.
+
+__INSIGHTS/Recommendations__
+
+To improve loan portfolio:
+
+- Give lesser loans or lesser loan amounts to persons taking long term loans and live on rental spaces.
+
+- Giving out loans to customers with zero credit problems, zero bankruptcies, zero tax liens,zero open accounts will have a portfolio where 3 in every 4 loans disbursed will be fully paid.
+
+- Generally, giving out more short term loans, with lesser current loan amount, more years of credit history, higher credit scores, lesser credit problems, lesser bankruptcies, lesser tax liens, and lesser open accounts will have the portfolio perform better.
+
+
+Set up and download needed packages
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+
+# Check which packages are already installed, install others
+pkgs <- c("dplyr", "ggplot2", "knitr", "readxl", "kableExtra","here", "writexl","stats","corrplot")
+miss_pkgs <- pkgs[!pkgs %in% installed.packages()[,1]] # vector of missing packages
+if(length(miss_pkgs)>0){
+  install.packages(miss_pkgs)}
+
+## Load the packages
+invisible(lapply(pkgs,library,character.only=TRUE))
+
+rm(miss_pkgs, pkgs)
+```
+
+Load the data
+```{r cars}
+data<-read.csv(here("Clean_Data","credit_train_final_clean_v1.csv"))
+
+#drop unnecessary variable of Loain Id and customer id to enhance performance
+cols_to_drop<-c("Loan.ID","Customer.ID")
+data<- data%>%
+  select(!cols_to_drop)
+```
+
+First, explore the overall split of the Loan status
+```{r}
+#summarize
+ln.status<-data%>%
+  select (Loan.Status)%>%
+  group_by(Loan.Status)%>%
+  summarise(count=n())
+  
+ln.status<-ln.status%>%
+  mutate(percentage=(count/sum(count))*100)
+
+#Create a bar graph
+ln.status%>% 
+  ggplot(aes(x=Loan.Status,y=percentage))+geom_bar(stat="identity",fill="#0033A1")+labs(x="Loan Status",y="Percentage (%) of customers")+ geom_text(aes(label = paste0(round(percentage), "%")), vjust = -0.5, size = 3, color = "black")+ggtitle("Distribution of Loan Status")+scale_y_continuous(limits = c(0,80), breaks = seq(0,80,20), labels = c("0%", "20%", "40%","60%","80%")) 
+```
+Explore distribution of Customer Income Level
+```{r}
+#First, I will need to create levels within income level since it is a continous variable
+#Round it off to whole number
+inc<-data%>%
+  select(Annual.Income)
+inc$Annual.Income<-round(inc$Annual.Income)
+#Explore summary of the variables to have a clue on how to create new levels
+summary(inc$Annual.Income)
+
+inc <- inc %>%
+  mutate(income_classes = case_when(
+    `Annual.Income` < 100000 ~ "Less than 100K",
+    `Annual.Income` >= 100000 & `Annual.Income` <= 500000 ~ "100K - 500K",
+    `Annual.Income` > 500000 & `Annual.Income` <= 1000000 ~ "501K - 1M",
+    `Annual.Income` > 1000000 & `Annual.Income` <= 1500000 ~ "1M - 1.5M",
+    `Annual.Income` > 1500000 & `Annual.Income` <= 2000000 ~ "1.5M - 2M",
+    `Annual.Income` > 2000000 ~ "More than 2M"
+  ))
+
+#Summarize
+inc.sum<-inc%>%
+  select(income_classes)%>%
+  group_by(income_classes)%>%
+  summarise(count=n())
+inc.sum<-inc.sum%>%
+  mutate(percentage=(count/sum(count))*100)
+
+#Now create a bar graph to represent this
+inc.sum%>% 
+  ggplot(aes(x=reorder(income_classes,percentage),y=percentage))+geom_bar(stat="identity",fill="#0033A1")+labs(x="Annual Income",y="Percentage (%) of customers")+geom_text(aes(label = paste0(round(percentage), "%")), hjust = -0.5, size = 3, color = "black")+ggtitle("Distribution of Income Level")+coord_flip()+scale_y_continuous(limits = c(0,40), breaks = seq(0,40,20), labels = c("0%", "20%", "40%")) 
+```
+Explore distribution of years in current job
+```{r}
+years<-data%>%
+  select(Years.in.current.job)
+#Summarize
+years.sum<-years%>%
+  select(Years.in.current.job)%>%
+  group_by(Years.in.current.job)%>%
+  summarise(count=n())
+years.sum<-years.sum%>%
+  mutate(percentage=(count/sum(count))*100)
+
+#Now create a bar graph to represent this
+years.sum%>% 
+  ggplot(aes(x=reorder(Years.in.current.job,percentage),y=percentage))+geom_bar(stat="identity",fill="#0033A1")+labs(x="Years in current job",y="Percentage (%) of customers")+geom_text(aes(label = paste0(round(percentage), "%")), hjust = -0.5, size = 3, color = "black")+ggtitle("How many years in your current job?")+coord_flip()+scale_y_continuous(limits = c(0,40), breaks = seq(0,40,20), labels = c("0%", "20%", "40%")) 
+```
+Explore the home ownership of the customers
+```{r}
+#Explore the unique instances of home ownership
+unique(data$Home.Ownership) #"Home Mortgage" and "HaveMortgage" seem to be repeated. Combine them
+data <- data %>%
+  mutate(Home.Ownership = case_when(
+    Home.Ownership %in% c("HaveMortgage", "Home Mortgage") ~ "Home mortgage",
+    TRUE ~ Home.Ownership
+  ))
+#summarize
+home<-data%>%
+  select (Home.Ownership)%>%
+  group_by(Home.Ownership)%>%
+  summarise(count=n())
+
+home<-home%>%
+  mutate(percentage=(count/sum(count))*100)
+
+
+#Create a bar graph
+home %>% 
+  ggplot(aes(x = reorder(Home.Ownership, percentage), y = percentage)) +
+  geom_bar(stat = "identity", fill = "#0033A1") +
+  labs(x = "Home ownership", y = "Percentage (%) of customers") +
+  geom_text(aes(label = paste0(round(percentage), "%")), hjust = -0.5, size = 3, color = "black") +
+  ggtitle("Distribution of Home Ownership") +
+  coord_flip() +
+  scale_y_continuous(limits = c(0, 60), breaks = seq(0, 60, 20), labels = c("0%", "20%", "40%", "60%"))
+```
+Explore distribution of Years of Creadit History
+```{r}
+#Fisrt check the summary of the years of credit history
+summary(data$Years.of.Credit.History)
+#subste the data
+years.credit<-data%>%
+  select(Years.of.Credit.History)
+
+#Explore summary of the variables to have a clue on how to create new levels
+summary(inc$Annual.Income)
+#Create new classifications to help plot
+ years.credit<- years.credit %>%
+  mutate(years.credit.category = case_when(
+    `Years.of.Credit.History` < 10 ~ "Less than 10 yrs",
+    `Years.of.Credit.History` >= 10 & `Years.of.Credit.History` <= 20 ~ "10 - 20 yrs",
+    `Years.of.Credit.History` > 20  ~ "Greater than 20 yrs",
+  ))
+
+#Summarize
+years.credit.sum<- years.credit%>%
+  select(years.credit.category)%>%
+  group_by(years.credit.category)%>%
+  summarise(count=n())
+years.credit.sum<-years.credit.sum%>%
+  mutate(percentage=(count/sum(count))*100)
+
+#Create a bar graph
+years.credit.sum %>% 
+  ggplot(aes(x = reorder(years.credit.category, percentage), y = percentage)) +
+  geom_bar(stat = "identity", fill = "#0033A1") +
+  labs(x = "Years of Credit History", y = "Percentage (%) of customers") +
+  geom_text(aes(label = paste0(round(percentage), "%")), hjust = -0.5, size = 3, color = "black") +
+  ggtitle("Distribution of Years of Credit History") +
+  coord_flip() +
+  scale_y_continuous(limits = c(0, 60), breaks = seq(0, 60, 20), labels = c("0%", "20%", "40%", "60%"))
+```
+Explore distribution of Credit Score
+```{r}
+#Fisrt check the summary of the years of credit history
+summary(data$Credit.Score)
+#subste the data
+credit.s<-data%>%
+  select(Credit.Score)
+
+#Create new classifications to help plot
+ credit.s<- credit.s %>%
+  mutate(credit.score.category = case_when(
+    `Credit.Score` >=580 & `Credit.Score` <= 669 ~ "580 - 669 (Fair)",
+    `Credit.Score` >= 670 & `Credit.Score` <= 739 ~ "670 - 739 (Good)",
+    `Credit.Score` >= 740 & `Credit.Score` <=751 ~ "740 - 751 (Very Good)"
+  ))
+
+#Summarize
+ credit.sum<- credit.s%>%
+  select(credit.score.category)%>%
+  group_by(credit.score.category)%>%
+  summarise(count=n())
+credit.sum<-credit.sum%>%
+  mutate(percentage=(count/sum(count))*100)
+
+#Create a bar graph
+credit.sum %>% 
+  ggplot(aes(x = reorder(credit.score.category, percentage), y = percentage)) +
+  geom_bar(stat = "identity", fill = "#0033A1") +
+  labs(x = "Credit Score", y = "Percentage (%) of customers") +
+  geom_text(aes(label = paste0(round(percentage), "%")), hjust = -0.5, size = 3, color = "black") +
+  ggtitle("Distribution of Credit Score") +
+  coord_flip() +
+  scale_y_continuous(limits = c(0, 80), breaks = seq(0, 80, 20), labels = c("0%", "20%", "40%", "60%","80%"))
+```
+Explore distribution of loan term
+```{r}
+#summarize
+ln.term<-data%>%
+  select (Term)%>%
+  group_by(Term)%>%
+  summarise(count=n())
+  
+ln.term<-ln.term%>%
+  mutate(percentage=(count/sum(count))*100)
+
+#Create a bar graph
+ln.term%>% 
+  ggplot(aes(x=Term,y=percentage))+geom_bar(stat="identity",fill="#0033A1")+labs(x="Loan Term",y="Percentage (%) of customers")+ geom_text(aes(label = paste0(round(percentage), "%")), vjust = -0.5, size = 3, color = "black")+ggtitle("Distribution of Loan Term")+scale_y_continuous(limits = c(0,80), breaks = seq(0,80,20), labels = c("0%", "20%", "40%","60%","80%")) 
+```
+Explore distribution of Loan purpose
+```{r}
+#Check the unique options under loan purpose
+unique(data$Purpose)
+#combine some choices with typos or overlap
+data <- data %>%
+  mutate(Purpose = case_when(
+    Purpose %in% c("Buy House", "Home Improvements","moving") ~ "House purchase & improvements",
+    Purpose %in% c("other", "Other") ~ "Other",
+    Purpose %in% c("vacation", "Take a Trip") ~ "Vacation",
+    TRUE ~ Purpose
+  ))
+#Summarize
+ ln.purpose<-data%>%
+  select(Purpose)%>%
+  group_by(Purpose)%>%
+  summarise(count=n())
+ln.purpose<-ln.purpose%>%
+  mutate(percentage=(count/sum(count))*100)
+
+#Create a bar graph
+ln.purpose %>% 
+  ggplot(aes(x = reorder(Purpose, percentage), y = percentage)) +
+  geom_bar(stat = "identity", fill = "#0033A1") +
+  labs(x = "Loan purpose", y = "Percentage (%) of customers") +
+  geom_text(aes(label = paste0(round(percentage,1), "%")), hjust = -0.5, size = 3, color = "black") +
+  ggtitle("Distribution of Loan Purpose") +
+  coord_flip() +
+  scale_y_continuous(limits = c(0, 100), breaks = seq(0, 100, 20), labels = c("0%", "20%", "40%", "60%","80%","100%"))
+```
+
+Explore distribution of Loan amount
+
+```{r}
+#Fisrt explore the summary
+summary(data$Current.Loan.Amount)
+
+#subset data
+ln.amt<-data%>%
+  select(Current.Loan.Amount)
+#create loan amount categories
+ln.amt<- ln.amt %>%
+  mutate(ln.amt.category = case_when(
+    `Current.Loan.Amount` < 200000  ~ "Less than 200K",
+    `Current.Loan.Amount` >= 200000 & `Current.Loan.Amount` <= 500000 ~ "200 - 500K",
+    `Current.Loan.Amount` >= 500001 ~ "More than 500K"
+  ))
+
+#Summarize
+ ln.amt.s<-ln.amt%>%
+  select(ln.amt.category)%>%
+  group_by(ln.amt.category)%>%
+  summarise(count=n())
+ln.amt.s<-ln.amt.s%>%
+  mutate(percentage=(count/sum(count))*100)
+
+#Create a bar graph
+ln.amt.s %>% 
+  ggplot(aes(x = reorder(ln.amt.category, percentage), y = percentage)) +
+  geom_bar(stat = "identity", fill = "#0033A1") +
+  labs(x = "Loan Amount", y = "Percentage (%) of customers") +
+  geom_text(aes(label = paste0(round(percentage), "%")), hjust = -0.5, size = 3, color = "black") +
+  ggtitle("Distribution of Loan Amount") +
+  coord_flip() +
+  scale_y_continuous(limits = c(0, 60), breaks = seq(0, 60, 20), labels = c("0%", "20%", "40%", "60%"))
+```
+
+Now, explore crosstabulations with the target variable as well as among the independent variables
+
+1) How does the loan status of customers vary with the home ownership status?
+```{r}
+#subset the data
+ln.v.hm<-data%>%
+  select(Loan.Status,Home.Ownership)%>%
+  group_by(Loan.Status,Home.Ownership)%>%
+  summarise(count=n())
+ln.v.hm<-ln.v.hm%>%
+  mutate(percentage=count/sum(count)*100)
+#pallet of colors
+```{r, echo=FALSE, warning=FALSE, include=FALSE}
+#Create a palette of colors
+pal <- scale_fill_manual(values =   c("#0033A1","#73C2F3","#ADADAD","#323232","#0071BC", "#40B6B7","#0033A1","#5DBCD2","#0018F9", "#66AAD7","#00A6E0", "#0080FE", "#1D274C"))
+
+#Create a bar graph
+ln.v.hm %>% 
+  ggplot(aes(x = Home.Ownership, y = percentage, fill = Home.Ownership)) +
+  geom_bar(stat = "identity") +
+  labs(x="",y = "Percentage (%) of customers") +
+  geom_text(aes(label = paste0(round(percentage,1), "%")), vjust = -0.5, size = 3, color = "black") +
+  ggtitle("Loan Status vs. Home Ownership") +
+  scale_y_continuous(limits = c(0, 80), breaks = seq(0, 80, 20), labels = c("0%", "20%", "40%", "60%", "80%")) +
+  facet_wrap(~Loan.Status) +
+  pal +  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+```
+
+
+Interestingly, majority of the loans charged are from customers who live on rental spaces. The difference between rental home customers and Home mortgage customers is by 2.9%. Not very big differnece, but itneresting to note. 
+
+On the other hand, majority of those loans fully paid are from customers with home mortgage, with a difference of 9.7%; quite significant. It would be interesting to check if there is any statistically significant association 
+
+
+2.) How does the loan status vary based on the term of the loan
+```{r}
+#subset the data
+ln.v.tm<-data%>%
+  select(Loan.Status,Term)%>%
+  group_by(Loan.Status,Term)%>%
+  summarise(count=n())
+ln.v.tm<-ln.v.tm%>%
+  mutate(percentage=count/sum(count)*100)
+
+
+#Create a bar graph
+ln.v.tm %>% 
+  ggplot(aes(x = Term, y = percentage, fill = Term)) +
+  geom_bar(stat = "identity") +
+  labs(x="",y = "Percentage (%) of customers") +
+  geom_text(aes(label = paste0(round(percentage,1), "%")), vjust = -0.5, size = 3, color = "black") +
+  ggtitle("Loan Status vs. Loan Term") +
+  scale_y_continuous(limits = c(0, 80), breaks = seq(0, 80, 20), labels = c("0%", "20%", "40%", "60%", "80%")) +
+  facet_wrap(~Loan.Status) +
+  pal 
+```
+
+
+This seems consistent with the overall distribution (more short term than long term loans). However, worth to note that there are more (37%) of long term loans in the charged off category than in the Fully paid category (23%). This could imply that long term loans are more likely to end up in default.
+
+3.) How does loan status vary with annual income
+```{r}
+#combine loan status with income category classified earliar
+ln.v.inc<-data.frame(Loan_status=data$Loan.Status,income_category=inc$income_classes)
+
+inc_sumary<-ln.v.inc%>%
+group_by(Loan_status,income_category)%>%
+  summarise(count=n())
+inc_sumary<-inc_sumary%>%
+  mutate(percentage=count/sum(count)*100)
+
+
+#Create a bar graph
+inc_sumary %>% 
+  ggplot(aes(x = income_category, y = percentage, fill = income_category)) +
+  geom_bar(stat = "identity") +
+  labs(x="",y = "Percentage (%) of customers") +
+  geom_text(aes(label = paste0(round(percentage,1), "%")), vjust = -0.5, size = 3, color = "black") +
+  ggtitle("Loan Status vs. Annual Income") +
+  scale_y_continuous(limits = c(0, 80), breaks = seq(0, 80, 20), labels = c("0%", "20%", "40%", "60%", "80%")) +
+  facet_wrap(~Loan_status) +
+  pal +theme(axis.text.x = element_text(angle = 60, hjust = 1))
+
+```
+
+This is consisitent with the overall distribution of Annual income, however it is inferable that it is more riskier to lend to customers with an annual income of 500,000 to 1,000,000 than any other income category.
+
+4.) How does Loan status vary with the current Loan Amount?
+```{r}
+#Create a dataframe to hold loan amount category and loan status
+amt.v.status<-data.frame(loan.status=data$Loan.Status,loan.amount.category=ln.amt$ln.amt.category)
+
+amt_sumary<-amt.v.status%>%
+group_by(loan.status,loan.amount.category)%>%
+  summarise(count=n())
+amt_sumary<-amt_sumary%>%
+  mutate(percentage=count/sum(count)*100)
+
+
+#Create a bar graph
+amt_sumary %>% 
+  ggplot(aes(x = loan.amount.category, y = percentage, fill = loan.amount.category)) +
+  geom_bar(stat = "identity") +
+  labs(x="",y = "Percentage (%) of customers") +
+  geom_text(aes(label = paste0(round(percentage,1), "%")), vjust = -0.5, size = 3, color = "black") +
+  ggtitle("Loan Status vs. Current Loan Amount") +
+  scale_y_continuous(limits = c(0, 80), breaks = seq(0, 80, 20), labels = c("0%", "20%", "40%", "60%", "80%")) +
+  facet_wrap(~loan.status) +
+  pal +theme(axis.text.x = element_text(angle = 60, hjust = 1))
+```
+
+This is generally consistent with the loan amount distribution, where the 200-500k category was leading. However, a point to note, of the More than 500k category, there are more defaulters (5.2% more) than those who fully pay their loans - unlike the other two categories where the percenatge in the charged off category is lower than the fully paid category.
+
+5)How does Loan status vary with the creditr score?
+```{r}
+#create data frame
+ln.v.cscore<-data.frame(loan.status=data$Loan.Status,credit.score.cat=credit.s$credit.score.category)
+
+cs_sumary<-ln.v.cscore%>%
+group_by(loan.status,credit.score.cat)%>%
+  summarise(count=n())
+cs_sumary<-cs_sumary%>%
+  mutate(percentage=count/sum(count)*100)
+
+
+#Create a bar graph
+cs_sumary %>% 
+  ggplot(aes(x = credit.score.cat, y = percentage, fill = credit.score.cat)) +
+  geom_bar(stat = "identity") +
+  labs(x="",y = "Percentage (%) of customers") +
+  geom_text(aes(label = paste0(round(percentage,1), "%")), vjust = -0.5, size = 3, color = "black") +
+  ggtitle("Loan Status vs. Credit score") +
+  scale_y_continuous(limits = c(0, 80), breaks = seq(0, 80, 20), labels = c("0%", "20%", "40%", "60%", "80%")) +
+  facet_wrap(~loan.status) +
+  pal +theme(axis.text.x = element_text(angle = 60, hjust = 1))
+```
+
+This is consistent with the overall distribution of credit score categories. However, a point to note, unlike the Fair and Good categories where there are higher percenatge of defaulters than those who fully paid their loans, the Very Good category has a higher (12.2% more) percentage in the fully paid category than the charged off category
+
+6)How does the loan status vary with the years of credit history?
+
+```{r}
+#Explore the years of credit history to categorize
+summary(data$Years.of.Credit.History)
+ln.v.crhist<-data.frame(loan.status=data$Loan.Status,cr.hist=data$Years.of.Credit.History)
+#Create categories
+ln.v.crhist<- ln.v.crhist %>%
+  mutate(hist.category = case_when(
+    `cr.hist` < 5  ~ "Less than 5yrs",
+    `cr.hist` >= 5 & `cr.hist` <= 10 ~ "5 - 10yrs",
+    `cr.hist` >= 10.1 & `cr.hist` <= 20 ~ "11 - 20yrs",
+    `cr.hist` >= 20.1 ~ "More than 20yrs"
+  ))
+
+#Create a bar graph to show count
+ggplot(data, aes(x =Years.of.Credit.History )) +
+  geom_histogram(binwidth = 1, fill = "#0033A1", color = "black") +
+  labs(title = "Histogram of Years of Credit History",
+       x = "Years of Credit History",
+       y = "Count") +
+  theme_minimal()
+#Shows a pretty noraml distribution, with majority being between 10 and 20 years of credit history
+
+#subset the data to create a crosstab of years of credit history and loan status
+ln.v.crhist<- ln.v.crhist %>%
+  select(loan.status,hist.category)
+#summarise
+hist_sumary<-ln.v.crhist%>%
+group_by(loan.status,hist.category)%>%
+  summarise(count=n())
+hist_sumary<-hist_sumary%>%
+  mutate(percentage=count/sum(count)*100)
+
+
+#Create a bar graph
+hist_sumary %>% 
+  ggplot(aes(x = hist.category, y = percentage, fill = hist.category)) +
+  geom_bar(stat = "identity") +
+  labs(x="",y = "Percentage (%) of customers") +
+  geom_text(aes(label = paste0(round(percentage,1), "%")), vjust = -0.5, size = 3, color = "black") +
+  ggtitle("Loan Status vs. Years of creidt history") +
+  scale_y_continuous(limits = c(0, 80), breaks = seq(0, 80, 20), labels = c("0%", "20%", "40%", "60%", "80%")) +
+  facet_wrap(~loan.status) +
+  pal +theme(axis.text.x = element_text(angle = 60, hjust = 1))
+```
+
+
+The bar graph is consistent with the overal distribution of years of credit history
+
+7)How does Loan Status vary with months since last deliquent?
+```{r}
+#Explore the years of credit history to categorize
+summary(data$Months.since.last.delinquent)
+ln.v.months<-data.frame(loan.status=data$Loan.Status,months.since.deliquent=data$Months.since.last.delinquent)
+#Create categories
+ln.v.months<- ln.v.months %>%
+  mutate(months.category = case_when(
+    `months.since.deliquent` < 12  ~ "Less than 12 months",
+    `months.since.deliquent` >= 12 & `months.since.deliquent` <= 24 ~ "12-24 months",
+    `months.since.deliquent` >= 24.01 & `months.since.deliquent` <= 48 ~ "24-48 months",
+    `months.since.deliquent` >= 48.01 ~ "More than 48 months"
+  ))
+
+#Create a bar graph to show count
+ggplot(data, aes(x =Months.since.last.delinquent)) +
+  geom_histogram(binwidth = 1, fill = "#0033A1", color = "black") +
+  labs(title = "Histogram of months Since last deliquent",
+       x = "Months since last deliquent",
+       y = "Count") +
+  theme_minimal()
+#Shows a pretty noraml distribution, with majority being between 12 and 50 months since last deliquent
+
+#subset the data to create a crosstab of months since deliquent and loan status
+ln.v.months<- ln.v.months %>%
+  select(loan.status,months.category)
+#summarise
+month_sumary<-ln.v.months%>%
+group_by(loan.status,months.category)%>%
+  summarise(count=n())
+month_sumary<-month_sumary%>%
+  mutate(percentage=count/sum(count)*100)
+
+
+#Create a bar graph
+month_sumary %>% 
+  ggplot(aes(x = months.category, y = percentage, fill = months.category)) +
+  geom_bar(stat = "identity") +
+  labs(x="",y = "Percentage (%) of customers") +
+  geom_text(aes(label = paste0(round(percentage,1), "%")), vjust = -0.5, size = 3, color = "black") +
+  ggtitle("Loan Status vs. Months since last deliquent") +
+  scale_y_continuous(limits = c(0, 80), breaks = seq(0, 80, 20), labels = c("0%", "20%", "40%", "60%", "80%")) +
+  facet_wrap(~loan.status) +
+  pal +theme(axis.text.x = element_text(angle = 60, hjust = 1))
+```
+
+
+Consistent with the overall distribution of months since last deliquent, majority in both loans charged off and those fully paid have 24-48 months since they were last deliquent
+
+8) How does loan status vary with current credit balance
+```{r}
+#Explore the years of credit history to categorize
+summary(data$Current.Credit.Balance)
+ln.v.crbalance<-data.frame(loan.status=data$Loan.Status,credit.balance=data$Current.Credit.Balance)
+#Create categories
+ln.v.crbalance<- ln.v.crbalance %>%
+  mutate(credit.category = case_when(
+    `credit.balance` < 115000  ~ "Less than 115K",
+    `credit.balance` >= 115000 & `credit.balance` <= 210000 ~ "115K-210K",
+    `credit.balance` >= 210001 & `credit.balance` <= 400000 ~ "210K-400K",
+    `credit.balance` >= 400001 ~ "More than 400K"
+  ))
+
+#subset the data to create a crosstab of credit balance and loan status
+ln.v.bal<- ln.v.crbalance %>%
+  select(loan.status,credit.category)
+#summarise
+bal_sumary<-ln.v.bal%>%
+group_by(loan.status,credit.category)%>%
+  summarise(count=n())
+bal_sumary<-bal_sumary%>%
+  mutate(percentage=count/sum(count)*100)
+
+
+#Create a bar graph
+bal_sumary %>% 
+  ggplot(aes(x = credit.category, y = percentage, fill =credit.category)) +
+  geom_bar(stat = "identity") +
+  labs(x="",y = "Percentage (%) of customers") +
+  geom_text(aes(label = paste0(round(percentage,1), "%")), vjust = -0.5, size = 3, color = "black") +
+  ggtitle("Loan Status vs. Current credit balance") +
+  scale_y_continuous(limits = c(0, 40), breaks = seq(0, 40, 20), labels = c("0%", "20%", "40%")) +
+  facet_wrap(~loan.status) +
+  pal +theme(axis.text.x = element_text(angle = 60, hjust = 1))
+```
+
+
+Not so much, evenly distributed across credit balance categories
+
+#Explore the Association or Correlation between the independent variables versus the target variable
+
+1) Explore the relationship between loan status versus the current loan amount
+```{r}
+#First, convert the target variable to a dummy variable
+data <- data %>%
+  mutate(Loan.Status = ifelse(Loan.Status == 'Fully Paid', 1, 0))
+#Conduct a t-test to check if the mean current loan amount is different between the two groups
+t_test_result <- t.test(Current.Loan.Amount ~ Loan.Status, data = data)
+#silence scientific 
+options(scipen = 999)
+# Print the t-test result
+print(t_test_result)
+
+
+#Check the nature of the relationship using logistic regression
+# Fit logistic regression model
+logistic_model <- glm(Loan.Status ~ Current.Loan.Amount, data = data, family = binomial)
+
+# Summarize the model
+summary(logistic_model)
+
+```
+
+
+There is a statistically significant difference between the average current loan amount of the Fully Paid category (288894.4) and the average current loan amount of the Charged off category (324975.2), p=0.
+
+The logistic regression model shows that there is a statistically significant relationship between the loan status and teh current loan amount (p=0).The negative coeffiecient in the current loan amount indicate that as the current loan amount increases the logg odds of the loan being fully paid decrease.
+
+Next, explore the nature of relationship between loan status and loan term
+```{r}
+## Fit logistic regression model
+logistic_model <- glm(Loan.Status ~ Term, data = data, family = binomial)
+
+# Summarize the model
+summary(logistic_model)
+```
+
+
+
+There is a statistically significant relationship between the loan status and the term of the loan. If the loan is long term the log odds of the loan being fully paid increase by 0.60993, while when the loan is short term the log odds of the loan being fully paid increase by 0.67812. Since log odds for short term loans are higher, giving out more short term loans would improve the chances of a loan being repaid.
+
+Next, explore the nature of relationship between loan status and credit score
+```{r}
+## Fit logistic regression model
+logistic_model <- glm(Loan.Status ~ Credit.Score, data = data, family = binomial)
+
+# Summarize the model
+summary(logistic_model)
+```
+
+
+Next, Explore the nature of relationship between loan status and annual income
+```{r}
+## Fit logistic regression model
+logistic_model <- glm(Loan.Status ~ Annual.Income, data = data, family = binomial)
+
+# Summarize the model
+summary(logistic_model)
+```
+There is a significant relationship between annual income and loan status, with the positive coefficient indicating that as annual income increases, the log odds of a loan being fully repaid increase, albeit very small increase in odds. However, taing exponents of the log odds, shows that an increas ein annual income has no effect on the outcome (loan being fully paid)
+
+Next, explore nature of relationship between loan status and monthly debt
+```{r}
+## Fit logistic regression model
+logistic_model <- glm(Loan.Status ~ Monthly.Debt, data = data, family = binomial)
+
+# Summarize the model
+summary(logistic_model)
+```
+There is a significnat relationship between loan status and monthly debt. The negative coefficient indicates that as monthly debt increases the log odds of a loan being fully paid decrease, albeit by small odd.
+
+Next, expore relationship between loan status and Years of credit history
+```{r}
+## Fit logistic regression model
+logistic_model <- glm(Loan.Status ~ Years.of.Credit.History, data = data, family = binomial)
+
+# Summarize the model
+summary(logistic_model)
+```
+The relationship is significant. When a customer has zero years of credit history there are 0.908901 logg odds of the loan being fully paid. As the years of credit history increase, the log odds of a loan being repaid increase by 0.009836. Very significant.
+
+Next, explore nature of relationship between loan status and months since last deliquent
+```{r}
+## Fit logistic regression model
+logistic_model <- glm(Loan.Status ~ Months.since.last.delinquent, data = data, family = binomial)
+
+# Summarize the model
+summary(logistic_model)
+```
+The relationship is significant. When the customer has never been deliquent, the log odds of the loan being fully repaid are 1.054. As the moths since last deliquent increase the likelihood of a loan being fully paid increase, however this is not very significant (as indicated by the single asteric)-as you would expect.
+
+Next, explore the relationship between loan status and number of open accounts
+```{r}
+## Fit logistic regression model
+logistic_model <- glm(Loan.Status ~ Number.of.Open.Accounts, data = data, family = binomial)
+
+# Summarize the model
+summary(logistic_model)
+```
+The relationship is significant. When a customer has zero open accounts, the log odds of a loan being fully repaid increase by 1.155841. The negative coeffciient on number of open accounts indicates that as number of open accounts increase, the likelihood of a loan being fully repaid decrease by -0.006150
+
+Next, explore the nature of relationship between loan status and number of credit problems
+```{r}
+## Fit logistic regression model
+logistic_model <- glm(Loan.Status ~ Number.of.Credit.Problems, data = data, family = binomial)
+
+# Summarize the model
+summary(logistic_model)
+```
+Relationship is significant. When a customer has zero credit problems, the log odds of the loan being fully repaid increase by 1.092403. The negative coeficient indicate that as the number of credit problems increase the log odds of repaying the loan fully decrease-although not very significant
+
+Next, explore the nature of relationship between loan status and current credit balance
+```{r}
+## Fit logistic regression model
+logistic_model <- glm(Loan.Status ~ Current.Credit.Balance, data = data, family = binomial)
+
+# Summarize the model
+summary(logistic_model)
+```
+Relationship is significant. As credit balance increases the log odds of a loan being fully repaid increase, by a small margin though-moderately significant.
+
+Next, check relationship between loan status and maximum open credit
+```{r}
+## Fit logistic regression model
+logistic_model <- glm(Loan.Status ~ Maximum.Open.Credit, data = data, family = binomial)
+
+# Summarize the model
+summary(logistic_model)
+```
+Relationship is very significant. As the maximum open credit increases, the log odds of a loan being fully repaid increase-very significant.
+
+Next explore relationship between loan status and bankrupticies
+```{r}
+## Fit logistic regression model
+logistic_model <- glm(Loan.Status ~ Bankruptcies, data = data, family = binomial)
+
+# Summarize the model
+summary(logistic_model)
+```
+Relationship is significant, while the positive coefficient in bankruptcies indicate that as bankruptices increase, the log odds of a loan being fully repaid increase is not significant.
+
+Next, explore nature of relationship bewteen laon status and tax liens
+```{r}
+## Fit logistic regression model
+logistic_model <- glm(Loan.Status ~ Tax.Liens, data = data, family = binomial)
+
+# Summarize the model
+summary(logistic_model)
+```
+Relationship is significant. When tax liens increase the likelihood of a loan being fully paid decrease-very significant.
+
+Next, now explore relationship between loan status and categorical variables
+```{r}
+#Convert the target variable back to categorical
+data <- data %>%
+  mutate(Loan.Status = ifelse(Loan.Status == '1', "Fully Paid", "Charged Off"))
+```
+Check relationship between loan status and loan purpose
+```{r}
+chisq.test(data$Loan.Status,data$Purpose)
+```
+
+The relationship is significant. p=0
+
+Next, check relationship between loan status and years in current job
+```{r}
+chisq.test(data$Loan.Status,data$Years.in.current.job)
+```
+
+Relationship is significant, though note very signficant (p=0.01169).
+
+Next, explore relationship between loan status and home ownership
+```{r}
+chisq.test(data$Loan.Status,data$Home.Ownership)
+```
+
+Very significant.p=0
+
+#Check correlation betwen the numeric features
+```{r}
+#First, subset data to haev only numeric columns
+numeric_df <- data %>%
+  select_if(is.numeric)
+#I will need to create a heat map
+correlation_matrix <- cor(numeric_df)
+corrplot(correlation_matrix, method = "color", type = "upper", 
+         order = "hclust", tl.col = "black", tl.srt = 45)
+print(correlation_matrix)
+```
+
